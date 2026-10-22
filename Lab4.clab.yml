@@ -1,0 +1,77 @@
+name: iptables-firewall-lab
+
+topology:
+  nodes:
+
+    router:
+      kind: linux
+      image: alpine:latest
+      exec:
+        
+        - sysctl -w net.ipv4.ip_forward=1
+        - apk add --no-cache iptables
+       
+        - ip addr add 10.1.1.1/24   dev eth1
+        - ip addr add 192.168.10.1/24 dev eth2
+        - ip addr add 172.16.1.1/24  dev eth3
+        - ip addr add 172.16.1.2/24  dev eth4
+        - ip link set eth1 up
+        - ip link set eth2 up
+        - ip link set eth3 up
+        - ip link set eth4 up        
+        # Individual iptables commands
+        - iptables -P INPUT DROP
+        - iptables -P FORWARD DROP
+        - iptables -P OUTPUT ACCEPT
+        - iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        - iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
+        - iptables -A FORWARD -s 172.16.1.200 -j DROP
+        - iptables -A INPUT -s 172.16.1.200 -j DROP
+        - iptables -A FORWARD -i eth1 -o eth2 -p tcp --dport 22 -j DROP
+        - iptables -A FORWARD -i eth1 -o eth2 -j ACCEPT
+        - iptables -A FORWARD -i eth3 -o eth2 -p tcp --dport 80 -m state --state NEW -j ACCEPT
+        - iptables -A FORWARD -i eth3 -o eth2 -p tcp --dport 443 -m state --state NEW -j ACCEPT
+        - iptables -A FORWARD -i eth3 -o eth2 -j DROP
+
+    
+    lan-client:
+      kind: linux
+      image: alpine:latest
+      exec:
+        - apk add --no-cache curl netcat-openbsd
+        - ip addr add 10.1.1.10/24 dev eth1
+        - ip route replace default via 10.1.1.1 dev eth1
+
+    
+    dmz-server:
+      kind: linux
+      image: nginx:alpine
+      binds:
+        - config/index.html:/usr/share/nginx/html/index.html:ro
+      exec:
+        - ip addr add 192.168.10.10/24 dev eth1
+        - ip route replace default via 192.168.10.1 dev eth1
+
+    
+    wan-client:
+      kind: linux
+      image: alpine:latest
+      exec:
+        - apk add --no-cache curl netcat-openbsd
+        - ip addr add 172.16.1.100/24 dev eth1
+        - ip route replace default via 172.16.1.1 dev eth1
+
+    
+    wan-attacker:
+      kind: linux
+      image: alpine:latest
+      exec:
+        - apk add --no-cache curl netcat-openbsd
+        - ip addr add 172.16.1.200/24 dev eth1
+        - ip route replace default via 172.16.1.1 dev eth1
+
+  links:
+    - endpoints: ["router:eth1", "lan-client:eth1"]
+    - endpoints: ["router:eth2", "dmz-server:eth1"]
+    - endpoints: ["router:eth3", "wan-client:eth1"]
+    - endpoints: ["router:eth4", "wan-attacker:eth1"]
